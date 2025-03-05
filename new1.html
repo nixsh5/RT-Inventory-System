@@ -1,0 +1,223 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Barcode Scanner Web App</title>
+    <script src="https://cdn.jsdelivr.net/npm/quagga@0.12.1/dist/quagga.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+        }
+        #scanner-container {
+            width: 640px;
+            height: 480px;
+            border: 1px solid #ccc;
+            margin-bottom: 20px;
+        }
+        #results {
+            margin-top: 20px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        #total {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+        #status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .success {
+            background-color: #dff0d8;
+            color: #3c763d;
+        }
+        .error {
+            background-color: #f2dede;
+            color: #a94442;
+        }
+    </style>
+</head>
+<body>
+    <h1>Barcode Scanner</h1>
+    <div id="scanner-container"></div>
+    <button onclick="startScanner()">Start Scanner</button>
+    <button onclick="stopScanner()">Stop Scanner</button>
+    
+    <div id="status"></div>
+    
+    <div id="results">
+        <table>
+            <thead>
+                <tr>
+                    <th>Barcode</th>
+                    <th>Product Name</th>
+                    <th>Price</th>
+                    <th>Quantity</th>
+                    <th>Total</th>
+                </tr>
+            </thead>
+            <tbody id="productTable"></tbody>
+        </table>
+        <div id="total">Total: $0.00</div>
+    </div>
+
+    <script>
+        // Sample product database (replace this with a dynamic database query if needed)
+        const productDatabase = {
+            "8901491366052": { name: "Puffcorn", price: 10 },
+            "8901491101837": { name: "Lays", price: 10 },
+            "012345678929": { name: "Bread", price: 3.49 }
+        };
+
+        let scannedProducts = {};
+        let isScanning = false;
+        let isProcessing = false;
+
+        function startScanner() {
+            if (isScanning) return;
+            
+            Quagga.init({
+                inputStream: {
+                    name: "Live",
+                    type: "LiveStream",
+                    target: document.querySelector('#scanner-container'),
+                    constraints: {
+                        width: 640,
+                        height: 480,
+                        facingMode: "environment"
+                    }
+                },
+                decoder: {
+                    readers: ["ean_reader", "upc_reader"]
+                }
+            }, function(err) {
+                if (err) {
+                    showStatus("Error initializing scanner: " + err, false);
+                    console.error(err);
+                    return;
+                }
+                Quagga.start();
+                isScanning = true;
+                showStatus("Scanner started successfully", true);
+            });
+
+            Quagga.onDetected(function(result) {
+                const code = result.codeResult.code;
+                processBarcode(code);
+            });
+        }
+
+        function stopScanner() {
+            if (!isScanning) return;
+            Quagga.stop();
+            isScanning = false;
+            showStatus("Scanner stopped", true);
+        }
+
+        function checkBarcodeInDatabase(barcode) {
+            return productDatabase.hasOwnProperty(barcode);
+        }
+
+        function processBarcode(barcode) {
+            if (isProcessing) return;
+            isProcessing = true;
+
+            if (checkBarcodeInDatabase(barcode)) {
+                const product = productDatabase[barcode];
+                
+                if (scannedProducts[barcode]) {
+                    scannedProducts[barcode].quantity++;
+                    showStatus(`Added another ${product.name} (Barcode: ${barcode})`, true);
+                } else {
+                    scannedProducts[barcode] = {
+                        name: product.name,
+                        price: product.price,
+                        quantity: 1
+                    };
+                    showStatus(`Added ${product.name} (Barcode: ${barcode})`, true);
+                }
+                
+                updateDisplay();
+                updateProductQuantityInDatabase(barcode);  // Update quantity in DB
+            } else {
+                showStatus(`Error: Barcode ${barcode} not found in database`, false);
+            }
+
+            setTimeout(() => {
+                isProcessing = false;
+            }, 1000);
+        }
+
+        function updateDisplay() {
+            const tableBody = document.getElementById('productTable');
+            tableBody.innerHTML = '';
+            
+            let grandTotal = 0;
+            
+            for (const barcode in scannedProducts) {
+                const product = scannedProducts[barcode];
+                const total = product.price * product.quantity;
+                grandTotal += total;
+                
+                const row = document.createElement('tr');
+                row.innerHTML = ` 
+                    <td>${barcode}</td>
+                    <td>${product.name}</td>
+                    <td>$${product.price.toFixed(2)}</td>
+                    <td>${product.quantity}</td>
+                    <td>$${total.toFixed(2)}</td>
+                `;
+                tableBody.appendChild(row);
+            }
+            
+            document.getElementById('total').textContent = 
+                `Total: $${grandTotal.toFixed(2)}`;
+        }
+
+        function showStatus(message, isSuccess) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.className = isSuccess ? 'success' : 'error';
+            setTimeout(() => {
+                statusDiv.textContent = '';
+                statusDiv.className = '';
+            }, 3000);
+        }
+
+        function updateProductQuantityInDatabase(barcode) {
+            const xhr = new XMLHttpRequest();
+            
+            xhr.open('GET', 'update_quantity.php?barcode=' + barcode, true);
+            
+            xhr.onreadystatechange = function() {
+                if (xhr.readyState === 4 && xhr.status === 200) {
+                    console.log('Quantity updated successfully');
+                }
+            };
+            
+            xhr.send();  
+        }
+    </script>
+
+    <div style="margin-top: 20px;">
+        <h3>Test Products:</h3>
+        <button onclick="addTestProduct('012345678905')">Add Apple Juice</button>
+        <button onclick="addTestProduct('012345678912')">Add Chocolate Bar</button>
+        <button onclick="addTestProduct('012345678929')">Add Bread</button>
+        <button onclick="addTestProduct('999999999999')">Test Invalid Barcode</button>
+    </div>
+</body>
+</html>
